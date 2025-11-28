@@ -1,0 +1,895 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>ERP v3 - Sistema Integral</title>
+    
+    <!-- LIBRERÍAS EXTERNAS -->
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+
+    <!-- FIREBASE SDK -->
+    <script type="module">
+      import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+      import { getFirestore, collection, addDoc, getDocs, updateDoc, deleteDoc, doc, onSnapshot, query, orderBy, writeBatch, where } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+
+      // --- ZONA DE CREDENCIALES ---
+      const firebaseConfig = {
+        apiKey: "AIzaSyBaAlVJUSUcybQg-8eSM4n8vljURSgvubo",
+        authDomain: "erp-v3-3a93c.firebaseapp.com",
+        projectId: "erp-v3-3a93c",
+        storageBucket: "erp-v3-3a93c.firebasestorage.app",
+        messagingSenderId: "779319215390",
+        appId: "1:779319215390:web:1ab5f01acb87c8a678f50f"
+      };
+
+      window.initFirebase = (customConfig) => {
+        try {
+            const configToUse = customConfig || firebaseConfig;
+            if (!configToUse.apiKey) return false;
+            
+            const app = initializeApp(configToUse);
+            const db = getFirestore(app);
+            window.db = db;
+            window.fs = { collection, addDoc, getDocs, updateDoc, deleteDoc, doc, onSnapshot, query, orderBy, writeBatch, where };
+            console.log("🔥 Firebase Iniciado Correctamente");
+            return true;
+        } catch (e) {
+            console.error("Error crítico Firebase:", e);
+            return false;
+        }
+      };
+
+      if (firebaseConfig.apiKey) window.initFirebase();
+    </script>
+
+    <style>
+      body { background-color: #f3f4f6; font-family: 'Segoe UI', system-ui, sans-serif; -webkit-tap-highlight-color: transparent; overscroll-behavior-y: none; }
+      .fade-in { animation: fadeIn 0.3s ease-in-out; }
+      @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+      
+      .dropzone { border: 2px dashed #cbd5e1; transition: all 0.2s; }
+      .dropzone:hover, .dropzone.active { border-color: #4f46e5; background-color: #eef2ff; }
+      
+      @keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+      .toast-enter { animation: slideIn 0.3s ease-out forwards; }
+
+      /* Scrollbar fino */
+      ::-webkit-scrollbar { width: 4px; height: 4px; }
+      ::-webkit-scrollbar-track { background: transparent; }
+      ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+      ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+      
+      input, select, button { touch-action: manipulation; }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="text/babel">
+      const { useState, useEffect, useRef, useMemo, createContext, useContext } = React;
+
+      // --- CONTEXTO UI ---
+      const UIContext = createContext();
+      const UIProvider = ({ children }) => {
+          const [toasts, setToasts] = useState([]);
+          const [confirmModal, setConfirmModal] = useState({ isOpen: false, title: '', message: '', onConfirm: null });
+          const notify = (message, type = 'success') => {
+              const id = Date.now(); setToasts(prev => [...prev, { id, message, type }]);
+              setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 3000);
+          };
+          const confirmAction = ({ title, message, onConfirm }) => {
+              setConfirmModal({ isOpen: true, title: title || 'Confirmar', message: message || '¿Seguro?', onConfirm: async () => { await onConfirm(); setConfirmModal(prev => ({ ...prev, isOpen: false })); } });
+          };
+          return (
+              <UIContext.Provider value={{ notify, confirmAction }}>
+                  {children}
+                  <div className="fixed top-4 right-4 z-[100] flex flex-col gap-2 pointer-events-none w-full max-w-xs px-4 md:px-0 md:w-auto">{toasts.map(t => (<div key={t.id} className={`toast-enter pointer-events-auto px-4 py-3 rounded-lg shadow-lg text-sm font-medium flex items-center gap-2 text-white w-full ${t.type==='error'?'bg-rose-600':t.type==='info'?'bg-blue-600':'bg-emerald-600'}`}><Icon name={t.type==='error'?'AlertCircle':t.type==='info'?'Info':'CheckCircle'} size={18} />{t.message}</div>))}</div>
+                  {confirmModal.isOpen && (<div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm fade-in"><div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 text-center space-y-4"><div className="w-12 h-12 bg-rose-100 text-rose-600 rounded-full flex items-center justify-center mx-auto"><Icon name="AlertTriangle" size={24} /></div><h3 className="text-lg font-bold text-slate-900">{confirmModal.title}</h3><p className="text-sm text-slate-500">{confirmModal.message}</p><div className="flex gap-3 pt-2"><Button variant="secondary" onClick={() => setConfirmModal(prev => ({ ...prev, isOpen: false }))} className="flex-1 h-12">Cancelar</Button><Button variant="danger" onClick={confirmModal.onConfirm} className="flex-1 h-12">Sí, Confirmar</Button></div></div></div>)}
+              </UIContext.Provider>
+          );
+      };
+      const useUI = () => useContext(UIContext);
+
+      // --- UTILIDADES ---
+      const Icon = ({ name, size = 18, className = "" }) => {
+        const ref = useRef(null);
+        useEffect(() => { if (ref.current && window.lucide) { ref.current.innerHTML = ''; const i = lucide.createElement(lucide.icons[name]); i.setAttribute('width', size); i.setAttribute('height', size); i.setAttribute('class', `lucide lucide-${name.toLowerCase()} ${className}`); ref.current.appendChild(i); } }, [name, size, className]);
+        return <span ref={ref} style={{ display: 'inline-flex' }} />;
+      };
+      const Spinner = () => <Icon name="Loader2" className="animate-spin text-indigo-600" size={32} />;
+      const formatCurrency = (val) => val ? '$' + parseInt(val).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ".") : '$0';
+      
+      const copyToClipboard = async (text) => { 
+          try { 
+              await navigator.clipboard.writeText(text); return true; 
+          } catch (e) { 
+              // Fallback robusto
+              try {
+                  const ta = document.createElement('textarea');
+                  ta.value = text;
+                  ta.style.position = 'fixed';
+                  document.body.appendChild(ta);
+                  ta.focus();
+                  ta.select();
+                  document.execCommand('copy');
+                  document.body.removeChild(ta);
+                  return true;
+              } catch (err) { return false; }
+          } 
+      };
+
+      const generateSignature = async (params, apiSecret) => { const sortedKeys = Object.keys(params).sort(); const stringToSign = sortedKeys.map(key => `${key}=${params[key]}`).join('&') + apiSecret; const msgBuffer = new TextEncoder().encode(stringToSign); const hashBuffer = await crypto.subtle.digest('SHA-1', msgBuffer); return Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join(''); };
+
+      // --- COMPRESIÓN DE IMAGEN CLIENT-SIDE (VELOCIDAD) ---
+      const compressImage = (file) => {
+          return new Promise((resolve, reject) => {
+              const reader = new FileReader();
+              reader.readAsDataURL(file);
+              reader.onload = (event) => {
+                  const img = new Image();
+                  img.src = event.target.result;
+                  img.onload = () => {
+                      const canvas = document.createElement('canvas');
+                      const MAX_WIDTH = 1024; // Max ancho para optimizar velocidad
+                      const scaleSize = MAX_WIDTH / img.width;
+                      canvas.width = MAX_WIDTH;
+                      canvas.height = img.height * scaleSize;
+                      
+                      const ctx = canvas.getContext('2d');
+                      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+                      
+                      canvas.toBlob((blob) => {
+                          if (blob) resolve(new File([blob], file.name, { type: 'image/jpeg', lastModified: Date.now() }));
+                          else reject(new Error("Error comprimiendo"));
+                      }, 'image/jpeg', 0.8); // Calidad 80%
+                  };
+                  img.onerror = (err) => reject(err);
+              };
+              reader.onerror = (err) => reject(err);
+          });
+      };
+
+      // --- CSV ENGINE ---
+      const convertToCSV = (objArray) => {
+          const array = typeof objArray !== 'object' ? JSON.parse(objArray) : objArray;
+          if (!array || !array.length) return '';
+          const headers = Object.keys(array[0]);
+          const csvRows = [];
+          csvRows.push(headers.join(','));
+          for (const row of array) {
+              const values = headers.map(header => {
+                  let val = row[header];
+                  if (val === null || val === undefined) val = '';
+                  const stringVal = ('' + val).replace(/"/g, '""');
+                  return `"${stringVal}"`;
+              });
+              csvRows.push(values.join(','));
+          }
+          return csvRows.join('\n');
+      };
+      const parseCSV = (text) => {
+          const lines = text.trim().split('\n');
+          const headers = lines[0].split(',').map(h => h.trim().replace(/^"|"$/g, ''));
+          const result = [];
+          for (let i = 1; i < lines.length; i++) {
+              if (!lines[i].trim()) continue;
+              const regex = /(?:^|,)(?:"([^"]*(?:""[^"]*)*)"|([^",]*))/g;
+              const currentline = [];
+              let match;
+              while (match = regex.exec(lines[i])) {
+                  let val = match[1] ? match[1].replace(/""/g, '"') : match[2];
+                  currentline.push(val);
+              }
+              if(currentline.length > headers.length) currentline.pop();
+              const obj = {};
+              for (let j = 0; j < headers.length; j++) { obj[headers[j]] = currentline[j] || ''; }
+              result.push(obj);
+          }
+          return result;
+      };
+
+      // --- SERVICIOS ---
+      const useCollection = (collectionName) => {
+          const [data, setData] = useState([]); const [loading, setLoading] = useState(true);
+          useEffect(() => { if (!window.db) return; const q = window.fs.query(window.fs.collection(window.db, collectionName)); const unsub = window.fs.onSnapshot(q, (snap) => { setData(snap.docs.map(doc => ({ id: doc.id, ...doc.data() }))); setLoading(false); }); return () => unsub(); }, [collectionName]);
+          return { data, loading };
+      };
+      const uploadToCloudinary = async (file, config, publicId, folderOverride) => {
+          if (!config.cloud_name || !config.upload_preset) throw new Error("Falta configuración de Cloudinary");
+          // Comprimir antes de subir
+          const compressedFile = await compressImage(file);
+          
+          const formData = new FormData(); formData.append('file', compressedFile); formData.append('upload_preset', config.upload_preset);
+          const folder = folderOverride || config.cloudinary_folder; if (folder) formData.append('folder', folder); if (publicId) formData.append('public_id', publicId);
+          const res = await fetch(`https://api.cloudinary.com/v1_1/${config.cloud_name}/image/upload`, { method: 'POST', body: formData });
+          if (!res.ok) throw new Error("Error subiendo imagen"); return await res.json();
+      };
+      const deleteFromCloudinary = async (publicId, config) => {
+          if (!config.api_key || !config.api_secret || !publicId) return false;
+          try { const timestamp = Math.round((new Date()).getTime() / 1000); const signature = await generateSignature({ public_id: publicId, timestamp: timestamp }, config.api_secret); const formData = new FormData(); formData.append('public_id', publicId); formData.append('api_key', config.api_key); formData.append('timestamp', timestamp); formData.append('signature', signature); const res = await fetch(`https://api.cloudinary.com/v1_1/${config.cloud_name}/image/destroy`, { method: 'POST', body: formData }); const data = await res.json(); return data.result === 'ok'; } catch (e) { return false; }
+      };
+
+      // --- COMPONENTES UI ---
+      const Button = ({ children, onClick, variant = 'primary', className = "", disabled = false, icon = null, title = "" }) => {
+          const styles = { primary: "bg-slate-900 text-white hover:bg-slate-800 shadow-lg shadow-slate-900/20", secondary: "bg-white text-slate-700 border border-slate-200 hover:bg-slate-50", danger: "bg-rose-100 text-rose-700 hover:bg-rose-200 border border-rose-200", success: "bg-emerald-600 text-white hover:bg-emerald-700" };
+          return <button onClick={onClick} disabled={disabled} title={title} className={`px-4 py-2 rounded-lg font-medium text-sm flex items-center justify-center gap-2 transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed ${styles[variant]} ${className}`}>{icon && <Icon name={icon} size={16}/>}{children}</button>;
+      };
+      const Input = ({ label, ...props }) => (<div className="flex flex-col gap-1.5 w-full">{label && <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">{label}</label>}<input {...props} className="w-full px-3 py-2.5 bg-white border border-slate-200 rounded-lg text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 outline-none transition-all" /></div>);
+      const NumberInput = ({ label, value, onChange, ...props }) => {
+          const format = (val) => { if (!val && val !== 0) return ''; return val.toString().replace(/\./g, '').replace(/\B(?=(\d{3})+(?!\d))/g, "."); };
+          const handleChange = (e) => { const raw = e.target.value.replace(/\./g, ''); if (!/^\d*$/.test(raw)) return; onChange({ target: { value: raw } }); };
+          return (<div className="flex flex-col gap-1.5 w-full">{label && <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">{label}</label>}<input {...props} type="text" inputMode="numeric" value={format(value)} onChange={handleChange} className="w-full px-3 py-2.5 bg-white border border-slate-200 rounded-lg text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 outline-none transition-all font-mono font-medium" /></div>);
+      };
+      const Select = ({ label, children, ...props }) => (<div className="flex flex-col gap-1.5 w-full">{label && <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">{label}</label>}<select {...props} className="w-full px-3 py-2.5 bg-white border border-slate-200 rounded-lg text-sm focus:border-indigo-500 outline-none">{children}</select></div>);
+      
+      const ImageUploader = ({ image, onFileSelect, loading, onClear }) => {
+          const [isDragging, setIsDragging] = useState(false); const inputId = useMemo(() => `file-input-${Math.random().toString(36).substr(2, 9)}`, []);
+          useEffect(() => { const handlePaste = (e) => { const tag = document.activeElement?.tagName; if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return; if (e.clipboardData && e.clipboardData.files.length > 0) { e.preventDefault(); if(e.clipboardData.files[0].type.startsWith('image/')) onFileSelect(e.clipboardData.files[0]); } }; window.addEventListener('paste', handlePaste); return () => window.removeEventListener('paste', handlePaste); }, [onFileSelect]);
+          const handleDrop = (e) => { e.preventDefault(); setIsDragging(false); if (e.dataTransfer.files[0]) onFileSelect(e.dataTransfer.files[0]); };
+          
+          const handleButtonClick = (e) => {
+             e.stopPropagation();
+             // Intento de leer portapapeles
+             navigator.clipboard.read().then(items => {
+                 for (const item of items) {
+                     if (item.types.some(type => type.startsWith('image/'))) {
+                         item.getType(item.types.find(type => type.startsWith('image/'))).then(blob => onFileSelect(blob));
+                         return;
+                     }
+                 }
+                 document.getElementById(inputId).click();
+             }).catch(() => { document.getElementById(inputId).click(); });
+          };
+
+          return (<div className={`relative border-2 border-dashed rounded-xl p-4 flex flex-col items-center justify-center text-center h-48 cursor-pointer transition-all group ${isDragging ? 'border-indigo-500 bg-indigo-50' : 'border-slate-300 hover:border-indigo-400 bg-slate-50'}`} onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }} onDragLeave={(e) => { e.preventDefault(); setIsDragging(false); }} onDrop={handleDrop} onClick={handleButtonClick}><input id={inputId} type="file" className="hidden" accept="image/*" onChange={(e) => e.target.files && onFileSelect(e.target.files[0])} />{loading ? (<div className="flex flex-col items-center text-indigo-600 gap-2"><Spinner /> <span className="text-xs font-bold">Subiendo...</span></div>) : image ? (<div className="relative w-full h-full"><img src={image} className="w-full h-full object-contain rounded-lg" /><div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity rounded-lg"><p className="text-white text-xs font-bold flex items-center gap-1"><Icon name="Edit" size={14}/> Cambiar</p></div><button onClick={(e) => { e.stopPropagation(); if(onClear) onClear(); }} className="absolute top-2 right-2 p-1.5 bg-white text-rose-600 rounded-full shadow-lg hover:scale-110 transition-transform z-10"><Icon name="Trash2" size={16}/></button></div>) : (<div className="text-slate-400 pointer-events-none flex flex-col items-center"><Icon name="Image" size={32} className="mx-auto mb-2"/><p className="text-xs font-medium mb-2">Arrastra o Pega (Ctrl+V)</p><button type="button" className="pointer-events-auto px-3 py-1.5 bg-indigo-100 text-indigo-700 rounded-full text-xs font-bold hover:bg-indigo-200 flex items-center gap-1 z-20"><Icon name="Clipboard" size={12}/> Pegar Imagen</button></div>)}</div>);
+      };
+
+      const Modal = ({ title, isOpen, onClose, children }) => { if (!isOpen) return null; return (<div className="fixed inset-0 z-[80] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm fade-in"><div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden"><div className="p-4 border-b flex justify-between items-center bg-slate-50"><h3 className="font-bold text-lg text-slate-800">{title}</h3><button onClick={onClose} className="p-1 hover:bg-slate-200 rounded-full"><Icon name="X" size={20}/></button></div><div className="p-6 overflow-y-auto">{children}</div></div></div>); };
+      const PaymentStatusIcon = ({ paid, total }) => { const p = Number(paid || 0); const t = Number(total || 0); let color = "bg-rose-100 text-rose-600 border-rose-200"; if (p > 0 && p < t) color = "bg-yellow-100 text-yellow-600 border-yellow-200"; if (p >= t && t > 0) color = "bg-emerald-100 text-emerald-600 border-emerald-200"; return <div className={`w-5 h-5 flex items-center justify-center rounded border text-[10px] font-bold ${color}`} title={`Pagado: ${formatCurrency(p)} / ${formatCurrency(t)}`}>$</div>; };
+      
+      const BulkActions = ({ type, data, onImport, sampleData }) => {
+          const { notify } = useUI();
+          const [importModalOpen, setImportModalOpen] = useState(false);
+          const [file, setFile] = useState(null);
+          const handleDownloadTemplate = () => { const exportData = data.length > 0 ? data : sampleData; const cleanData = exportData.map(({id, created_at, ...rest}) => rest); const csv = convertToCSV(cleanData); const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' }); const link = document.createElement("a"); link.href = URL.createObjectURL(blob); link.download = `${type}_data_${new Date().toISOString().slice(0,10)}.csv`; link.click(); };
+          const processImport = async () => { if(!file) return notify("Selecciona un archivo", "error"); const reader = new FileReader(); reader.onload = async (e) => { try { const text = e.target.result; const parsedData = parseCSV(text); if(!parsedData.length) return notify("Archivo vacío", "error"); await onImport(parsedData); setImportModalOpen(false); setFile(null); } catch (err) { notify("Error: " + err.message, "error"); } }; reader.readAsText(file); };
+          return (<div className="flex gap-2"><Button variant="secondary" onClick={handleDownloadTemplate} icon="Download" className="px-2 h-9">Exp</Button><Button variant="secondary" onClick={()=>setImportModalOpen(true)} icon="Upload" className="px-2 h-9">Imp</Button><Modal isOpen={importModalOpen} onClose={()=>setImportModalOpen(false)} title={`Importar ${type}`}><div className="space-y-4"><p className="text-sm text-slate-600">Sube un CSV. Usa el botón "Exp" para ver el formato.</p><input type="file" accept=".csv" onChange={e=>setFile(e.target.files[0])} className="w-full border p-2 rounded"/><div className="flex justify-end gap-2"><Button variant="secondary" onClick={()=>setImportModalOpen(false)}>Cancelar</Button><Button onClick={processImport}>Procesar</Button></div></div></Modal></div>);
+      };
+
+      // --- VISTAS ---
+
+      const SetupScreen = ({ onReady }) => { 
+          const [configInput, setConfigInput] = useState(''); const [error, setError] = useState(''); const handleConnect = () => { try { let jsonStr = configInput; if (jsonStr.includes('=')) jsonStr = jsonStr.substring(jsonStr.indexOf('=') + 1); if (jsonStr.trim().endsWith(';')) jsonStr = jsonStr.trim().slice(0, -1); const config = new Function("return " + jsonStr)(); if (window.initFirebase(config)) onReady(); else setError("Configuración inválida."); } catch (e) { setError("Error de formato."); } };
+          return (<div className="min-h-screen flex items-center justify-center p-4 bg-slate-100"><div className="bg-white p-8 rounded-2xl shadow-xl max-w-md w-full text-center space-y-6"><div className="w-16 h-16 bg-indigo-100 text-indigo-600 rounded-full flex items-center justify-center mx-auto"><Icon name="Database" size={32}/></div><h1 className="text-2xl font-bold text-slate-900">Conecta tu Firebase</h1><textarea className="w-full p-3 border rounded-lg text-xs font-mono bg-slate-50 h-32 focus:ring-2 focus:ring-indigo-500 outline-none" placeholder='{ apiKey: "...", ... }' value={configInput} onChange={e => setConfigInput(e.target.value)} /><Button onClick={handleConnect} className="w-full h-12 text-lg">Conectar</Button></div></div>);
+      };
+
+      // 2. CONFIGURACIÓN
+      const ConfigView = () => {
+          const { data: generalConfig } = useCollection('config_general');
+          const { data: providers } = useCollection('proveedores');
+          const { data: shipping } = useCollection('tarifas_envios');
+          const { data: financeConfig } = useCollection('config_finanzas'); 
+          const { data: lines } = useCollection('config_lineas');
+
+          const [tab, setTab] = useState('providers');
+          const { notify, confirmAction } = useUI();
+          
+          const [provForm, setProvForm] = useState({ nombre: '', id_custom: '', contacto: '', lineas: [] }); // Lineas ahora array
+          const [shipForm, setShipForm] = useState({ ciudad: '', tarifa: '', tiene_acopio: false });
+          const [cloudForm, setCloudForm] = useState({ cloud_name: '', upload_preset: '', cloudinary_folder: '', cloudinary_transaction_folder: '', api_key: '', api_secret: '' });
+          const [lineName, setLineName] = useState('');
+          
+          // States Finanzas Config
+          const [catIngreso, setCatIngreso] = useState('');
+          const [catGasto, setCatGasto] = useState('');
+          const [payMethod, setPayMethod] = useState({ name: '', isBank: false });
+          const [finConfig, setFinConfig] = useState({ ingresos: [], gastos: [], methods: [] });
+
+          useEffect(() => { if (generalConfig.length) setCloudForm(generalConfig[0]); }, [generalConfig]);
+          useEffect(() => { if (financeConfig.length) setFinConfig(financeConfig[0]); }, [financeConfig]);
+
+          // --- LOGICA LINEAS (NUEVO) ---
+          const saveLine = async () => {
+              if(!lineName) return notify("Escribe un nombre", "error");
+              try {
+                  await window.fs.addDoc(window.fs.collection(window.db, 'config_lineas'), { nombre: lineName });
+                  setLineName(''); notify("Línea agregada");
+              } catch(e) { notify(e.message, "error"); }
+          };
+          const deleteLine = (id) => confirmAction({ title: "Borrar Línea", message: "¿Seguro?", onConfirm: async () => { await window.fs.deleteDoc(window.fs.doc(window.db, 'config_lineas', id)); notify("Eliminada"); }});
+
+          // --- LOGICA PROVEEDORES ---
+          const toggleProvLine = (linea) => {
+               const currentLines = Array.isArray(provForm.lineas) ? provForm.lineas : [];
+               if(currentLines.includes(linea)) setProvForm({ ...provForm, lineas: currentLines.filter(l => l !== linea) });
+               else setProvForm({ ...provForm, lineas: [...currentLines, linea] });
+          };
+
+          const saveProvider = async () => {
+              if (!provForm.nombre || !provForm.id_custom) return notify("Incompleto", "error");
+              try {
+                  const payload = { nombre: provForm.nombre, id_custom: provForm.id_custom.toUpperCase(), contacto: provForm.contacto, lineas: provForm.lineas };
+                  if (provForm.id) await window.fs.updateDoc(window.fs.doc(window.db, 'proveedores', provForm.id), payload);
+                  else await window.fs.addDoc(window.fs.collection(window.db, 'proveedores'), payload);
+                  setProvForm({ nombre: '', id_custom: '', contacto: '', lineas: [] }); notify("Guardado");
+              } catch (e) { notify(e.message, "error"); }
+          };
+          const deleteProvider = (id) => confirmAction({ title: "Eliminar", message: "¿Seguro?", onConfirm: async () => { await window.fs.deleteDoc(window.fs.doc(window.db, 'proveedores', id)); notify("Eliminado"); }});
+          
+          // --- OTROS SAVE ---
+          const saveShipping = async () => {
+              if (!shipForm.ciudad || !shipForm.tarifa) return notify("Incompleto", "error");
+              try {
+                  const payload = { ciudad: shipForm.ciudad, tarifa: Number(shipForm.tarifa), tiene_acopio: shipForm.tiene_acopio };
+                  if (shipForm.id) await window.fs.updateDoc(window.fs.doc(window.db, 'tarifas_envios', shipForm.id), payload);
+                  else await window.fs.addDoc(window.fs.collection(window.db, 'tarifas_envios'), payload);
+                  setShipForm({ ciudad: '', tarifa: '', tiene_acopio: false }); notify("Guardado");
+              } catch (e) { notify(e.message, "error"); }
+          };
+          const deleteShipping = (id) => confirmAction({ title: "Eliminar", message: "¿Seguro?", onConfirm: async () => { await window.fs.deleteDoc(window.fs.doc(window.db, 'tarifas_envios', id)); notify("Eliminado"); }});
+
+          const saveGeneral = async () => {
+              try {
+                  const payload = { 
+                      cloud_name: cloudForm.cloud_name, 
+                      upload_preset: cloudForm.upload_preset, 
+                      cloudinary_folder: cloudForm.cloudinary_folder, 
+                      cloudinary_transaction_folder: cloudForm.cloudinary_transaction_folder, 
+                      api_key: cloudForm.api_key, 
+                      api_secret: cloudForm.api_secret,
+                      drive_folder_id: cloudForm.drive_folder_id
+                  };
+                  if (generalConfig.length) await window.fs.updateDoc(window.fs.doc(window.db, 'config_general', generalConfig[0].id), payload);
+                  else await window.fs.addDoc(window.fs.collection(window.db, 'config_general'), payload);
+                  notify("Guardado");
+              } catch (e) { notify(e.message, "error"); }
+          };
+
+          const updateFinConfig = async (newData) => {
+              try {
+                  if (financeConfig.length) await window.fs.updateDoc(window.fs.doc(window.db, 'config_finanzas', financeConfig[0].id), newData);
+                  else await window.fs.addDoc(window.fs.collection(window.db, 'config_finanzas'), newData);
+              } catch(e) { notify(e.message, "error"); }
+          };
+          const addCategory = (type, val) => { if(!val) return; const list = type==='ingreso'?[...(finConfig.ingresos||[])]:[...(finConfig.gastos||[])]; if(!list.includes(val)) { list.push(val); updateFinConfig(type==='ingreso'?{ingresos:list}:{gastos:list}); } if(type==='ingreso') setCatIngreso(''); else setCatGasto(''); };
+          const removeCategory = (type, val) => { const list = type==='ingreso'?(finConfig.ingresos||[]):(finConfig.gastos||[]); updateFinConfig(type==='ingreso'?{ingresos:list.filter(x=>x!==val)}:{gastos:list.filter(x=>x!==val)}); };
+          const addMethod = () => { if(!payMethod.name) return; const list = [...(finConfig.methods||[])]; list.push(payMethod); updateFinConfig({methods:list}); setPayMethod({name:'', isBank:false}); };
+          const removeMethod = (idx) => { const list = [...(finConfig.methods||[])]; list.splice(idx,1); updateFinConfig({methods:list}); };
+
+          return (
+              <div className="flex flex-col fade-in space-y-6 pb-24 md:pb-0 w-full">
+                  <div className="sticky top-0 bg-[#f3f4f6] z-30 flex gap-2 border-b border-slate-200 pb-1 overflow-x-auto w-full scrollbar-hide">
+                      {['providers', 'lines', 'shipping', 'finance', 'general'].map(t => (
+                          <button key={t} onClick={()=>setTab(t)} className={`px-3 py-2 whitespace-nowrap font-medium text-sm border-b-2 flex-shrink-0 ${tab===t?'border-indigo-600 text-indigo-600':'border-transparent text-slate-500 capitalize'}`}>
+                              {t==='providers'?'Proveedores':t==='lines'?'Líneas':t==='shipping'?'Envíos':t==='finance'?'Finanzas':'General'}
+                          </button>
+                      ))}
+                  </div>
+
+                  {/* TABLA LINEAS (NUEVO) */}
+                  {tab === 'lines' && (
+                      <div className="max-w-md mx-auto bg-white p-6 rounded-xl shadow-sm border border-slate-200">
+                          <h3 className="font-bold mb-4 text-slate-800">Gestión de Líneas</h3>
+                          <div className="flex gap-2 mb-4">
+                              <Input placeholder="Nueva Línea (Ej: Calzado)" value={lineName} onChange={e=>setLineName(e.target.value)} />
+                              <Button onClick={saveLine} icon="Plus">Agregar</Button>
+                          </div>
+                          <ul className="space-y-2">
+                              {lines.map(l => (
+                                  <li key={l.id} className="flex justify-between items-center border-b pb-2">
+                                      <span>{l.nombre}</span>
+                                      <button onClick={()=>deleteLine(l.id)} className="text-rose-500"><Icon name="Trash2" size={16}/></button>
+                                  </li>
+                              ))}
+                              {lines.length === 0 && <li className="text-slate-400 italic text-sm">No hay líneas registradas.</li>}
+                          </ul>
+                      </div>
+                  )}
+
+                  {/* TABLA PROVEEDORES (Actualizado con Líneas) */}
+                  {tab === 'providers' && (
+                      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                          <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 h-fit"><h3 className="font-bold mb-4 flex items-center gap-2"><Icon name="Plus"/> {provForm.id?'Editar':'Nuevo'} Proveedor</h3><div className="space-y-4"><Input label="Nombre Empresa" value={provForm.nombre} onChange={e=>setProvForm({...provForm, nombre:e.target.value})} /><div className="grid grid-cols-1 md:grid-cols-2 gap-2"><Input label="ID (4 letras)" value={provForm.id_custom} onChange={e=>setProvForm({...provForm, id_custom:e.target.value})} maxLength={4} /><Input label="Teléfono" value={provForm.contacto} onChange={e=>setProvForm({...provForm, contacto:e.target.value})} /></div>
+                              <div>
+                                  <label className="text-xs font-bold text-slate-500 uppercase block mb-2">Líneas Asociadas</label>
+                                  <div className="flex flex-wrap gap-2">
+                                      {lines.map(l => (
+                                          <button key={l.id} onClick={()=>toggleProvLine(l.nombre)} className={`px-2 py-1 rounded text-xs border ${provForm.lineas.includes(l.nombre)?'bg-indigo-100 border-indigo-300 text-indigo-700':'bg-white border-slate-200 text-slate-600'}`}>
+                                              {l.nombre}
+                                          </button>
+                                      ))}
+                                      {lines.length === 0 && <span className="text-xs text-rose-500">Crea líneas primero en la pestaña "Líneas".</span>}
+                                  </div>
+                              </div>
+                              <Button onClick={saveProvider} className="w-full h-12 md:h-10">Guardar</Button></div></div>
+                          <div className="lg:col-span-2 bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden"><div className="overflow-x-auto"><table className="w-full text-sm text-left"><thead className="bg-slate-50 font-bold text-slate-500"><tr><th className="p-3">ID</th><th className="p-3">Nombre</th><th className="p-3">Líneas</th><th className="p-3"></th></tr></thead><tbody className="divide-y">{providers.map(p=>(<tr key={p.id} className="hover:bg-slate-50 group"><td className="p-3 font-mono font-bold text-indigo-600">{p.id_custom}</td><td className="p-3">{p.nombre}</td><td className="p-3 text-xs">{Array.isArray(p.lineas) ? p.lineas.join(', ') : p.lineas}</td><td className="p-3 text-right flex gap-2 justify-end"><button onClick={()=>setProvForm(p)} className="text-indigo-600"><Icon name="Edit" size={16}/></button><button onClick={()=>deleteProvider(p.id)} className="text-rose-500"><Icon name="Trash2" size={16}/></button></td></tr>))}</tbody></table></div></div>
+                      </div>
+                  )}
+
+                  {/* TABLA ENVIOS */}
+                  {tab === 'shipping' && (
+                      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                          <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 h-fit"><h3 className="font-bold mb-4 flex items-center gap-2"><Icon name="MapPin"/> {shipForm.id?'Editar':'Nueva'} Cobertura</h3><div className="space-y-4"><Input label="Ciudad" value={shipForm.ciudad} onChange={e=>setShipForm({...shipForm, ciudad:e.target.value})} /><NumberInput label="Tarifa Envío" value={shipForm.tarifa} onChange={e=>setShipForm({...shipForm, tarifa:e.target.value})} /><div className="flex items-center gap-2 p-3 border rounded bg-slate-50"><input type="checkbox" id="acopioCheck" checked={shipForm.tiene_acopio} onChange={e=>setShipForm({...shipForm, tiene_acopio:e.target.checked})} className="w-4 h-4 text-indigo-600"/><label htmlFor="acopioCheck" className="text-sm font-medium text-slate-700">¿Tenemos Acopio aquí?</label></div><Button onClick={saveShipping} className="w-full h-12 md:h-10">Guardar Tarifa</Button></div></div>
+                          <div className="lg:col-span-2 bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden"><div className="overflow-x-auto"><table className="w-full text-sm text-left"><thead className="bg-slate-50 font-bold text-slate-500"><tr><th className="p-3">Ciudad</th><th className="p-3 text-right">Tarifa</th><th className="p-3 text-center">Acopio</th><th className="p-3"></th></tr></thead><tbody className="divide-y">{shipping.map(s=>(<tr key={s.id} className="hover:bg-slate-50 group"><td className="p-3 font-medium">{s.ciudad}</td><td className="p-3 text-right">{formatCurrency(s.tarifa)}</td><td className="p-3 text-center">{s.tiene_acopio ? <span className="bg-emerald-100 text-emerald-700 px-2 py-1 rounded text-xs">SÍ</span> : <span className="text-slate-400">-</span>}</td><td className="p-3 text-right flex gap-2 justify-end"><button onClick={()=>setShipForm(s)} className="text-indigo-600"><Icon name="Edit" size={16}/></button><button onClick={()=>deleteShipping(s.id)} className="text-rose-500"><Icon name="Trash2" size={16}/></button></td></tr>))}</tbody></table></div></div>
+                      </div>
+                  )}
+
+                  {/* FINANZAS */}
+                  {tab === 'finance' && (
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                          <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 space-y-6"><div><h4 className="font-bold text-slate-800 mb-2 flex gap-2"><Icon name="ArrowUpCircle" className="text-emerald-600"/> Categorías Ingresos</h4><div className="flex gap-2 mb-2"><Input placeholder="Ej: Venta..." value={catIngreso} onChange={e=>setCatIngreso(e.target.value)}/><Button onClick={()=>addCategory('ingreso', catIngreso)} icon="Plus"/></div><div className="flex flex-wrap gap-2">{(finConfig.ingresos||[]).map(c=><span key={c} className="bg-emerald-50 text-emerald-700 px-2 py-1 rounded text-xs flex items-center gap-1">{c} <button onClick={()=>removeCategory('ingreso', c)}><Icon name="X" size={12}/></button></span>)}</div></div><div className="border-t pt-4"><h4 className="font-bold text-slate-800 mb-2 flex gap-2"><Icon name="ArrowDownCircle" className="text-rose-600"/> Categorías Gastos</h4><div className="flex gap-2 mb-2"><Input placeholder="Ej: Nómina..." value={catGasto} onChange={e=>setCatGasto(e.target.value)}/><Button onClick={()=>addCategory('gasto', catGasto)} icon="Plus"/></div><div className="flex flex-wrap gap-2">{(finConfig.gastos||[]).map(c=><span key={c} className="bg-rose-50 text-rose-700 px-2 py-1 rounded text-xs flex items-center gap-1">{c} <button onClick={()=>removeCategory('gasto', c)}><Icon name="X" size={12}/></button></span>)}</div></div></div>
+                          <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200"><h4 className="font-bold text-slate-800 mb-4 flex gap-2"><Icon name="CreditCard"/> Métodos de Pago</h4><div className="space-y-3 mb-4 bg-slate-50 p-3 rounded border"><Input placeholder="Nombre (Ej: Bancolombia)" value={payMethod.name} onChange={e=>setPayMethod({...payMethod, name:e.target.value})}/><div className="flex items-center gap-2"><input type="checkbox" id="isBank" checked={payMethod.isBank} onChange={e=>setPayMethod({...payMethod, isBank:e.target.checked})} className="w-4 h-4"/><label htmlFor="isBank" className="text-sm">Es Bancario</label></div><Button onClick={addMethod} className="w-full">Agregar Método</Button></div><ul className="space-y-2">{(finConfig.methods||[]).map((m, i) => (<li key={i} className="flex justify-between items-center border-b pb-1"><span className="flex items-center gap-2">{m.name} {m.isBank && <Icon name="Landmark" size={14} className="text-slate-400"/>}</span><button onClick={()=>removeMethod(i)} className="text-rose-500"><Icon name="X" size={14}/></button></li>))}</ul></div>
+                      </div>
+                  )}
+
+                  {/* GENERAL */}
+                  {tab === 'general' && (
+                      <div className="max-w-md mx-auto bg-white p-6 rounded-xl shadow-sm border border-slate-200">
+                          <h3 className="font-bold mb-4 flex items-center gap-2"><Icon name="Cloud"/> Configuración Nube</h3>
+                          <div className="space-y-4">
+                              <Input label="Cloud Name" value={cloudForm.cloud_name} onChange={e=>setCloudForm({...cloudForm, cloud_name:e.target.value})} />
+                              <Input label="Upload Preset" value={cloudForm.upload_preset} onChange={e=>setCloudForm({...cloudForm, upload_preset:e.target.value})} />
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-4"><Input label="Folder Inventario" value={cloudForm.cloudinary_folder} onChange={e=>setCloudForm({...cloudForm, cloudinary_folder:e.target.value})} /><Input label="Folder Pagos" value={cloudForm.cloudinary_transaction_folder} onChange={e=>setCloudForm({...cloudForm, cloudinary_transaction_folder:e.target.value})} placeholder="ej: pagos" /></div>
+                              <Input label="Google Drive Folder ID" value={cloudForm.drive_folder_id} onChange={e=>setCloudForm({...cloudForm, drive_folder_id:e.target.value})} />
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2 border-t border-slate-100"><Input label="API Key" value={cloudForm.api_key} onChange={e=>setCloudForm({...cloudForm, api_key:e.target.value})} type="password" /><Input label="API Secret" value={cloudForm.api_secret} onChange={e=>setCloudForm({...cloudForm, api_secret:e.target.value})} type="password" /></div>
+                              <Button onClick={saveGeneral} className="w-full h-12 md:h-10">Guardar</Button>
+                          </div>
+                      </div>
+                  )}
+              </div>
+          );
+      };
+
+      // 3. INVENTARIO
+      const InventoryView = () => {
+          const { data: products, loading } = useCollection('productos');
+          const { data: providers } = useCollection('proveedores');
+          const { data: config } = useCollection('config_general');
+          const { data: shipping } = useCollection('tarifas_envios');
+          const { notify, confirmAction } = useUI();
+          
+          const [modalOpen, setModalOpen] = useState(false);
+          const [form, setForm] = useState({});
+          const [uploading, setUploading] = useState(false);
+          const [suggestions, setSuggestions] = useState({ brands: [], models: [] });
+          const [selectedProducts, setSelectedProducts] = useState([]);
+          const [filterText, setFilterText] = useState('');
+
+          const maxShipping = useMemo(() => { if (!shipping.length) return 0; return Math.max(...shipping.map(s => Number(s.tarifa) || 0)); }, [shipping]);
+          useEffect(() => { const brands = [...new Set(products.map(p => p.marca))].filter(Boolean); setSuggestions(prev => ({ ...prev, brands })); }, [products]);
+          useEffect(() => { if (form.marca) { const models = [...new Set(products.filter(p => p.marca === form.marca).map(p => p.modelo))].filter(Boolean); setSuggestions(prev => ({ ...prev, models })); } }, [form.marca, products]);
+
+          const openModal = (item = null) => { if (item) setForm({ ...item }); else setForm({ sku: '', nombre: '', modelo: '', marca: '', precio: 0, costo: 0, ganancia: 0, imagen: '', genero: 'Unisex', proveedor_uid: '', compartido: false, fecha: new Date().toISOString().slice(0,10) }); setModalOpen(true); };
+          const handleFile = async (file) => { if (!file || !config.length) return notify("Falta configuración nube", "error"); setUploading(true); try { const dateStr = (form.fecha || new Date().toISOString().slice(0,10)).replace(/-/g, '').slice(2); const clean = (s) => (s||'').toString().trim().replace(/[^a-zA-Z0-9]/g, '').toUpperCase() || 'X'; const publicId = `${dateStr}-${clean(form.sku)}-${clean(form.marca)}-${clean(form.modelo)}-${clean(form.nombre)}`; if (form.public_id) await deleteFromCloudinary(form.public_id, config[0]); const result = await uploadToCloudinary(file, config[0], publicId); setForm(prev => ({ ...prev, imagen: result.secure_url, public_id: result.public_id })); } catch (e) { notify("Error subida: " + e.message, "error"); } setUploading(false); };
+          const handleProviderChange = (e) => { const provId = e.target.value; const provData = providers.find(p => p.id === provId); if (!form.id && provData) { const random = Math.floor(1000 + Math.random() * 9000); setForm(prev => ({ ...prev, proveedor_uid: provId, sku: `${provData.id_custom}${random}` })); } else { setForm(prev => ({ ...prev, proveedor_uid: provId })); } };
+          const handleMoneyChange = (field, val) => { const num = Number(val) || 0; const baseCost = field === 'costo' ? num : (Number(form.costo) || 0); const totalCost = baseCost + maxShipping; const currentPrice = field === 'precio' ? num : (Number(form.precio) || 0); setForm(prev => { const next = { ...prev, [field]: num }; if (field === 'costo') next.ganancia = currentPrice - totalCost; else if (field === 'precio') next.ganancia = num - totalCost; else if (field === 'ganancia') next.precio = totalCost + num; return next; }); };
+          
+          const handleSave = async () => {
+              const payload = { sku: form.sku || '', nombre: form.nombre || '', modelo: form.modelo || '', marca: form.marca || '', precio: Number(form.precio) || 0, costo: Number(form.costo) || 0, ganancia: Number(form.ganancia) || 0, imagen: form.imagen || '', genero: form.genero || 'Unisex', proveedor_uid: form.proveedor_uid || '', compartido: !!form.compartido, fecha: form.fecha || new Date().toISOString().slice(0,10), public_id: form.public_id || '' };
+              try { 
+                  if (form.id) await window.fs.updateDoc(window.fs.doc(window.db, 'productos', form.id), payload); 
+                  else await window.fs.addDoc(window.fs.collection(window.db, 'productos'), { ...payload, created_at: new Date().toISOString() }); 
+                  setModalOpen(false); notify("Producto guardado"); 
+              } catch (e) { notify("Error: " + e.message, "error"); }
+          };
+          
+          const handleDelete = async (product) => { confirmAction({ title: "Eliminar", message: "¿Seguro?", onConfirm: async () => { if (product.public_id && config.length) await deleteFromCloudinary(product.public_id, config[0]); await window.fs.deleteDoc(window.fs.doc(window.db, 'productos', product.id)); notify("Eliminado"); }}); };
+          const handleBulkImport = async (data) => { const batch = window.fs.writeBatch(window.db); data.forEach(item => { const docRef = window.fs.doc(window.fs.collection(window.db, 'productos')); batch.set(docRef, { ...item, created_at: new Date().toISOString(), precio: Number(item.precio), costo: Number(item.costo), ganancia: Number(item.ganancia) }); }); await batch.commit(); notify(`${data.length} importados`); };
+          const toggleSelectAll = () => { if (selectedProducts.length === filteredProducts.length) setSelectedProducts([]); else setSelectedProducts(filteredProducts.map(p => p.id)); };
+          const toggleSelect = (id) => { if (selectedProducts.includes(id)) setSelectedProducts(prev => prev.filter(p => p !== id)); else setSelectedProducts(prev => [...prev, id]); };
+          const handleBulkDelete = () => { confirmAction({ title: `Eliminar ${selectedProducts.length}`, message: "Irreversible.", onConfirm: async () => { const batch = window.fs.writeBatch(window.db); selectedProducts.forEach(id => { const ref = window.fs.doc(window.db, 'productos', id); batch.delete(ref); }); await batch.commit(); setSelectedProducts([]); notify("Eliminados"); }}); };
+
+          const filteredProducts = useMemo(() => {
+              if (!filterText) return products;
+              const lowerFilter = filterText.toLowerCase();
+              return products.filter(p => 
+                  (p.marca && p.marca.toLowerCase().includes(lowerFilter)) ||
+                  (p.modelo && p.modelo.toLowerCase().includes(lowerFilter)) ||
+                  (p.genero && p.genero.toLowerCase().includes(lowerFilter)) ||
+                  (p.sku && p.sku.toLowerCase().includes(lowerFilter)) ||
+                  (p.precio && p.precio.toString().includes(lowerFilter)) || 
+                  (p.nombre && p.nombre.toLowerCase().includes(lowerFilter))
+              );
+          }, [products, filterText]);
+
+          if (loading) return <div className="p-10 flex justify-center"><Spinner/></div>;
+          return (
+              <div className="h-full flex flex-col fade-in pb-20 md:pb-0">
+                  <div className="flex justify-between items-center mb-6 gap-2">
+                      <h2 className="text-2xl font-bold text-slate-800 hidden md:block">Inventario</h2>
+                      <div className="flex-1 md:flex-none"><Input placeholder="Buscar..." value={filterText} onChange={(e) => setFilterText(e.target.value)} /></div>
+                      <div className="flex gap-2 items-center">
+                        {selectedProducts.length > 0 ? (
+                            <Button variant="danger" onClick={handleBulkDelete} icon="Trash2" className="h-10 px-3"><span className="hidden md:inline">Eliminar </span>({selectedProducts.length})</Button>
+                        ) : (
+                            <>
+                                <BulkActions type="Inventario" data={products} onImport={handleBulkImport} sampleData={[{sku:'TEST1', nombre:'Ej', marca:'M', modelo:'M', costo:100, precio:200, genero:'Unisex'}]} />
+                                <Button onClick={() => openModal()} icon="Plus" className="h-10 px-3"><span className="hidden md:inline">Nuevo</span></Button>
+                            </>
+                        )}
+                      </div>
+                  </div>
+                  <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden flex-1"><div className="overflow-x-auto h-full"><table className="w-full text-left text-sm"><thead className="bg-slate-50 text-slate-500 font-bold uppercase text-xs sticky top-0"><tr><th className="p-4 w-10 text-center"><input type="checkbox" checked={selectedProducts.length === filteredProducts.length && filteredProducts.length > 0} onChange={toggleSelectAll} className="w-4 h-4"/></th><th className="p-4">Img</th><th className="p-4">SKU</th><th className="p-4">Detalle</th><th className="p-4">Género</th><th className="p-4 text-right">Costo+Env</th><th className="p-4 text-right">Precio</th><th className="p-4"></th></tr></thead><tbody className="divide-y divide-slate-100">{filteredProducts.map(p => (<tr key={p.id} className={`hover:bg-slate-50 group cursor-pointer ${selectedProducts.includes(p.id)?'bg-indigo-50':''}`} onClick={() => openModal(p)}><td className="p-4 text-center" onClick={(e)=>e.stopPropagation()}><input type="checkbox" checked={selectedProducts.includes(p.id)} onChange={() => toggleSelect(p.id)} className="w-4 h-4"/></td><td className="p-4"><img src={p.imagen || 'https://via.placeholder.com/40'} className="w-10 h-10 rounded object-cover border"/></td><td className="p-4 font-mono font-bold text-indigo-600">{p.sku}</td><td className="p-4"><div className="font-medium">{p.marca} {p.modelo}</div><div className="text-xs text-slate-500">{p.nombre}</div></td><td className="p-4">{p.genero}</td><td className="p-4 text-right text-slate-400">{formatCurrency(p.costo + maxShipping)}</td><td className="p-4 text-right font-bold">{formatCurrency(p.precio)}</td><td className="p-4 text-right"><button onClick={(e)=>{e.stopPropagation(); handleDelete(p);}} className="text-rose-500 hover:bg-rose-50 p-2 rounded"><Icon name="Trash2" size={16}/></button></td></tr>))}</tbody></table></div></div>
+                  <Modal isOpen={modalOpen} onClose={() => setModalOpen(false)} title={form.id ? "Editar" : "Nuevo"}><div className="space-y-4"><ImageUploader image={form.imagen} onFileSelect={handleFile} loading={uploading} onClear={() => setForm({...form, imagen: ''})} /><div className="grid grid-cols-1 md:grid-cols-2 gap-4"><Input type="date" label="Fecha" value={form.fecha} onChange={e => setForm({...form, fecha: e.target.value})} /><Select label="Proveedor" value={form.proveedor_uid} onChange={handleProviderChange}><option value="">Selecciona...</option>{providers.map(p => <option key={p.id} value={p.id}>{p.nombre} ({p.id_custom})</option>)}</Select></div><div className="grid grid-cols-1 md:grid-cols-2 gap-4"><Input label="SKU" value={form.sku} readOnly className="bg-slate-100 font-mono font-bold text-indigo-700" /><Select label="Género" value={form.genero} onChange={e => setForm({...form, genero: e.target.value})}><option>Unisex</option><option>Hombre</option><option>Mujer</option><option>Niños</option></Select></div><div className="grid grid-cols-1 md:grid-cols-2 gap-4"><div><Input label="Marca" list="brands-list" value={form.marca} onChange={e => setForm({...form, marca: e.target.value})} /><datalist id="brands-list">{suggestions.brands.map(b => <option key={b} value={b}/>)}</datalist></div><div><Input label="Modelo" list="models-list" value={form.modelo} onChange={e => setForm({...form, modelo: e.target.value})} /><datalist id="models-list">{suggestions.models.map(m => <option key={m} value={m}/>)}</datalist></div></div><Input label="Nombre Genérico" value={form.nombre} onChange={e => setForm({...form, nombre: e.target.value})} /><div className="bg-slate-50 p-4 rounded-xl border border-slate-100 space-y-3"><div className="flex justify-between text-xs text-slate-500 px-1"><span>Costo Base: {formatCurrency(form.costo)}</span><span>+ Envío Máx: {formatCurrency(maxShipping)}</span><span className="font-bold text-slate-700">= Total: {formatCurrency((Number(form.costo)||0) + maxShipping)}</span></div><div className="grid grid-cols-1 md:grid-cols-3 gap-4"><NumberInput label="Costo Base" value={form.costo} onChange={e => handleMoneyChange('costo', e.target.value)} /><NumberInput label="Precio Venta" value={form.precio} onChange={e => handleMoneyChange('precio', e.target.value)} /><NumberInput label="Ganancia Real" value={form.ganancia} onChange={e => handleMoneyChange('ganancia', e.target.value)} className="font-bold text-emerald-600" /></div></div><div className="pt-2 flex justify-end gap-3"><Button variant="secondary" onClick={() => setModalOpen(false)}>Cancelar</Button><Button onClick={handleSave} disabled={uploading}>Guardar</Button></div></div></Modal>
+              </div>
+          );
+      };
+      
+      // 4. PEDIDOS
+      const OrdersView = () => {
+          const { data: orders } = useCollection('pedidos');
+          const { data: products } = useCollection('productos');
+          const { data: shipping } = useCollection('tarifas_envios');
+          const { data: providers } = useCollection('proveedores');
+          const { notify, confirmAction } = useUI();
+          
+          const [tab, setTab] = useState('sales'); 
+          const [modalOpen, setModalOpen] = useState(false);
+          const [editingId, setEditingId] = useState(null);
+          const [cart, setCart] = useState([]);
+          const [client, setClient] = useState({ nombre: '', contacto: '', telefono: '', direccion: '', ciudad: '', ciudad_entrega: '', es_acopio: false });
+          const [itemSearch, setItemSearch] = useState('');
+
+          const [guideModalOpen, setGuideModalOpen] = useState(false);
+          const [guideForm, setGuideForm] = useState({ guide: '', date: new Date().toISOString().slice(0,10), ordersToUpdate: [] });
+          const [batchGuideModalOpen, setBatchGuideModalOpen] = useState(false);
+          const [batchGuideForm, setBatchGuideForm] = useState({ guide: '', date: new Date().toISOString().slice(0,10), ordersToUpdate: [] });
+
+          const logisticsData = useMemo(() => {
+              const processGroups = (filterFn) => {
+                  const grouped = {};
+                  orders.filter(filterFn).forEach(order => {
+                      order.items.forEach(item => {
+                          const provId = item.proveedor_uid || 'unknown';
+                          const provName = item.proveedor_nombre || 'Sin Proveedor';
+                          if (!grouped[provId]) grouped[provId] = { providerName: provName, virtualOrderId: `ORD-${provName.slice(0,3).toUpperCase()}-${new Date().getDate()}`, cities: {} };
+                          const city = order.cliente.ciudad_entrega || 'Sin Ciudad';
+                          if (!grouped[provId].cities[city]) grouped[provId].cities[city] = { acopio: [], directo: [] };
+                          const itemData = { ...item, clientName: order.cliente.nombre, orderId: order.id_visual, originalOrderId: order.id, unique_id_short: (item.unique_id || Math.random().toString()).slice(-6), guia: order.guia };
+                          if (order.estrategia === 'Acopio') grouped[provId].cities[city].acopio.push(itemData);
+                          else grouped[provId].cities[city].directo.push(itemData);
+                      });
+                  });
+                  return grouped;
+              };
+              return { active: processGroups(o => ['Pendiente', 'Parcial', 'En Despacho'].includes(o.estado)), history: processGroups(o => ['Enviado'].includes(o.estado)) };
+          }, [orders]);
+
+          const handleCityChange = (city) => {
+              const cityData = shipping.find(s => s.ciudad.toLowerCase() === city.toLowerCase());
+              const hasAcopio = cityData?.tiene_acopio || false;
+              setClient(prev => ({ ...prev, ciudad_entrega: city, es_acopio: hasAcopio, estrategia: hasAcopio ? 'Acopio' : 'Directo' }));
+          };
+          
+          const addToCart = (product) => {
+              setCart(prev => [...prev, { sku: product.sku, modelo: product.modelo, imagen: product.imagen, precio: product.precio, unique_id: crypto.randomUUID(), cantidad: 1, total: product.precio, proveedor_nombre: providers.find(p => p.id === product.proveedor_uid)?.nombre, proveedor_uid: product.proveedor_uid, pago_parcial: 0 }]);
+              setItemSearch('');
+          };
+          const handleEditOrder = (order) => { setClient(order.cliente); setCart(order.items); setEditingId(order.id); setModalOpen(true); };
+          const handleDeleteOrder = async (id) => confirmAction({ title: "Eliminar Pedido", message: "¿Seguro?", onConfirm: async () => { await window.fs.deleteDoc(window.fs.doc(window.db, 'pedidos', id)); notify("Eliminado"); }});
+
+          const submitOrder = async () => {
+              if (!client.nombre || cart.length === 0) return notify("Faltan datos", "error");
+              try {
+                  // Safe Payload Order (BLINDADO)
+                  const orderData = { 
+                      cliente: {
+                          nombre: client.nombre, contacto: client.contacto, telefono: client.telefono,
+                          direccion: client.direccion, ciudad: client.ciudad, ciudad_entrega: client.ciudad_entrega, es_acopio: !!client.es_acopio
+                      },
+                      items: cart.map(i => ({
+                          sku: i.sku, modelo: i.modelo, imagen: i.imagen, precio: i.precio, unique_id: i.unique_id, cantidad: i.cantidad, total: i.total,
+                          proveedor_nombre: i.proveedor_nombre, proveedor_uid: i.proveedor_uid, pago_parcial: i.pago_parcial
+                      })),
+                      total: cart.reduce((s, i) => s + i.total, 0), 
+                      estado: 'Pendiente', 
+                      fecha: new Date().toISOString(), 
+                      id_visual: Date.now().toString().slice(-6), 
+                      estrategia: client.estrategia || 'Directo'
+                  };
+                  if (editingId) await window.fs.updateDoc(window.fs.doc(window.db, 'pedidos', editingId), orderData);
+                  else await window.fs.addDoc(window.fs.collection(window.db, 'pedidos'), orderData);
+                  setModalOpen(false); setCart([]); setClient({ nombre: '', contacto: '', telefono: '', direccion: '', ciudad: '', ciudad_entrega: '', es_acopio: false }); setEditingId(null); notify("Pedido guardado");
+              } catch (e) { notify(e.message, "error"); }
+          };
+
+          const openGuideModal = (ids) => { setGuideForm({ guide: '', date: new Date().toISOString().slice(0,10), ordersToUpdate: ids }); setGuideModalOpen(true); };
+          const saveGuide = async () => {
+              if(!guideForm.guide) return notify("Falta la guía", "error");
+              try {
+                  const batch = window.fs.writeBatch(window.db);
+                  guideForm.ordersToUpdate.forEach(oid => {
+                      const ref = window.fs.doc(window.db, 'pedidos', oid);
+                      batch.update(ref, { guia: { numero: guideForm.guide, fecha: guideForm.date }, estado: 'Enviado' });
+                  });
+                  await batch.commit(); notify("Despacho registrado"); setGuideModalOpen(false);
+              } catch (e) { notify(e.message, "error"); }
+          };
+
+          // MODAL LOTE MASIVO
+          const openBatchGuideModal = (items) => {
+              const uniqueOrderIds = [...new Set(items.map(it => it.originalOrderId))];
+              setBatchGuideForm({ guide: '', date: new Date().toISOString().slice(0,10), ordersToUpdate: uniqueOrderIds });
+              setBatchGuideModalOpen(true);
+          };
+          const saveBatchGuide = async () => {
+              if(!batchGuideForm.guide) return notify("Falta la guía", "error");
+              try {
+                  const batch = window.fs.writeBatch(window.db);
+                  batchGuideForm.ordersToUpdate.forEach(oid => {
+                      const ref = window.fs.doc(window.db, 'pedidos', oid);
+                      batch.update(ref, { guia: { numero: batchGuideForm.guide, fecha: batchGuideForm.date }, estado: 'Enviado' });
+                  });
+                  await batch.commit(); notify("Lote despachado"); setBatchGuideModalOpen(false);
+              } catch (e) { notify(e.message, "error"); }
+          };
+
+          const groupDirectOrders = (items) => { const grouped = {}; items.forEach(item => { if(!grouped[item.originalOrderId]) grouped[item.originalOrderId] = { orderId: item.originalOrderId, visualId: item.orderId, client: item.clientName, items: [], guia: item.guia }; grouped[item.originalOrderId].items.push(item); }); return Object.values(grouped); };
+          const renderLogisticsGroup = (groupData, title) => (
+              <div className="space-y-8">
+                  <h3 className="font-bold text-xl text-slate-700 mb-4">{title}</h3>
+                  {Object.keys(groupData).map(provId => (
+                      <div key={provId} className="border border-slate-200 rounded-xl bg-white overflow-hidden shadow-sm"><div className="bg-slate-900 text-white px-6 py-3 font-bold text-lg flex items-center justify-between"><div className="flex items-center gap-2"><Icon name="Truck"/> {groupData[provId].providerName}</div><div className="flex gap-3 text-xs font-normal opacity-80"><span className="bg-white/10 px-2 py-1 rounded">Ref: {groupData[provId].virtualOrderId}</span></div></div><div className="p-6 grid grid-cols-1 lg:grid-cols-2 gap-6">{Object.keys(groupData[provId].cities).map(cityKey => { const cityData = groupData[provId].cities[cityKey]; const directGroups = groupDirectOrders(cityData.directo); return (<div key={cityKey} className="col-span-2 lg:col-span-1 bg-slate-50 border border-slate-200 rounded-xl p-4"><h4 className="font-bold text-slate-800 flex items-center gap-2 mb-3 border-b border-slate-200 pb-2"><Icon name="MapPin" size={16} className="text-indigo-600"/> {cityKey}</h4><div className="space-y-4">{cityData.acopio.length > 0 && (<div className="bg-indigo-50 border border-indigo-100 rounded-lg p-3 relative"><div className="flex justify-between items-center mb-2"><span className="text-xs font-bold text-indigo-700 uppercase flex gap-1"><Icon name="Box" size={12}/> Acopio</span>{title.includes('Pendientes') ? (<button onClick={()=>openBatchGuideModal(cityData.acopio)} className="text-[10px] bg-indigo-600 text-white px-2 py-1 rounded hover:bg-indigo-700 flex items-center gap-1"><Icon name="Truck" size={10}/> Guía Lote</button>) : (<span className="text-[10px] text-slate-500 font-mono">Guía: {cityData.acopio[0]?.guia?.numero}</span>)}</div><ul className="space-y-2">{cityData.acopio.map((it, k) => (<li key={k} className="flex gap-3 bg-white p-2 rounded border border-indigo-100 shadow-sm"><img src={it.imagen || 'https://via.placeholder.com/40'} className="w-10 h-10 object-cover rounded bg-gray-100"/><div className="flex-1"><div className="flex justify-between text-sm font-bold text-indigo-900"><span>{it.modelo}</span><span>{it.talla || 'Unique'}</span></div><div className="flex justify-between text-xs text-slate-500"><span>{it.sku}</span><span>Ord #{it.orderId}</span></div></div></li>))}</ul></div>)}{directGroups.length > 0 && (<div className="bg-emerald-50 border border-emerald-100 rounded-lg p-3"><div className="flex justify-between items-center mb-2"><span className="text-xs font-bold text-emerald-700 uppercase flex gap-1"><Icon name="Send" size={12}/> Directos</span></div><div className="space-y-3">{directGroups.map((group, k) => (<div key={k} className="bg-white p-2 rounded border border-emerald-200 shadow-sm"><div className="flex justify-between items-center border-b border-emerald-100 pb-1 mb-1"><div><div className="text-xs font-bold text-emerald-900">{group.client}</div><div className="text-[10px] text-emerald-600">Ord #{group.visualId}</div></div>{title.includes('Pendientes') ? (<button onClick={()=>openGuideModal([group.orderId])} className="text-[10px] bg-emerald-600 text-white px-2 py-1 rounded hover:bg-emerald-700 flex items-center gap-1" title="Asignar Guía"><Icon name="Truck" size={10}/></button>) : (<span className="text-[10px] text-slate-500 font-mono">Guía: {group.guia?.numero}</span>)}</div><div className="space-y-1">{group.items.map((it, i) => (<div key={i} className="flex gap-2 items-center"><img src={it.imagen || 'https://via.placeholder.com/30'} className="w-6 h-6 rounded object-cover"/><div className="text-xs flex-1"><span className="font-bold">{it.cantidad}x</span> {it.modelo} ({it.sku})</div></div>))}</div></div>))}</div></div>)}</div></div>);})}</div></div>))}
+                  {Object.keys(groupData).length === 0 && <div className="text-center text-slate-400 p-10 italic">No hay registros en esta sección.</div>}
+              </div>
+          );
+
+          return (
+              <div className="h-full flex flex-col fade-in space-y-4 pb-20 md:pb-0">
+                  <div className="flex justify-between items-center border-b border-slate-200 pb-2">
+                      <div className="flex gap-4"><button onClick={()=>setTab('sales')} className={`text-lg font-bold px-2 py-1 border-b-2 ${tab==='sales'?'border-indigo-600 text-slate-800':'border-transparent text-slate-400'}`}>Ventas</button><button onClick={()=>setTab('logistics')} className={`text-lg font-bold px-2 py-1 border-b-2 ${tab==='logistics'?'border-indigo-600 text-slate-800':'border-transparent text-slate-400'}`}>Logística</button></div>
+                      {tab === 'sales' && <Button onClick={()=>{setEditingId(null); setClient({ nombre: '', contacto: '', telefono: '', direccion: '', ciudad: '', ciudad_entrega: '', es_acopio: false }); setCart([]); setModalOpen(true)}} icon="Plus">Nuevo Pedido</Button>}
+                  </div>
+                  {tab === 'sales' && <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 overflow-auto pb-10">{orders.sort((a,b)=>b.id_visual-a.id_visual).map(order => (<div key={order.id} className="bg-white p-4 rounded-xl shadow-sm border border-slate-200 hover:shadow-md transition-shadow relative group"><div className="flex justify-between mb-2"><div><h4 className="font-bold">{order.cliente.nombre}</h4><span className="text-xs text-slate-500">{order.cliente.ciudad_entrega} ({order.estrategia})</span></div><div className="flex flex-col gap-1 items-end"><span className={`px-2 py-0.5 rounded text-[10px] font-bold ${order.estado==='Enviado'?'bg-purple-100 text-purple-800':order.estado==='En Despacho'?'bg-blue-100 text-blue-800':'bg-amber-100 text-amber-800'}`}>{order.estado}</span>{order.guia && <span className="text-[10px] text-slate-500 font-mono">Guía: {order.guia.numero}</span>}</div></div><div className="space-y-2 text-sm text-slate-600 mb-3">{order.items.map((it,i)=>(<div key={i} className="flex items-center gap-2 bg-slate-50 p-1 rounded justify-between"><div className="flex items-center gap-2"><PaymentStatusIcon paid={it.pago_parcial} total={it.total}/><div className="font-bold text-indigo-600">{it.cantidad}x</div><div className="truncate max-w-[120px]" title={it.modelo}>{it.modelo}</div></div><div className="text-xs text-slate-400">{it.sku}</div></div>))}</div><div className="pt-2 border-t flex justify-between font-bold text-slate-900 items-center"><span>Total: {formatCurrency(order.total)}</span><div className="flex gap-1"><button onClick={()=>handleEditOrder(order)} className="p-1 text-indigo-600 hover:bg-indigo-50 rounded"><Icon name="Edit" size={16}/></button><button onClick={()=>handleDeleteOrder(order.id)} className="p-1 text-rose-600 hover:bg-rose-50 rounded"><Icon name="Trash2" size={16}/></button></div></div></div>))}</div>}
+                  {tab === 'logistics' && <div className="overflow-auto pb-10">{renderLogisticsGroup(logisticsData.active, "Pendientes por Despachar")}{Object.keys(logisticsData.history).length > 0 && (<div className="mt-12 pt-8 border-t border-slate-300">{renderLogisticsGroup(logisticsData.history, "Historial de Envíos Recientes")}</div>)}</div>}
+                  <Modal isOpen={modalOpen} onClose={()=>{setModalOpen(false); setEditingId(null)}} title={editingId ? "Editar Pedido" : "Nuevo Pedido"}><div className="flex flex-col gap-4"><div className="bg-slate-50 p-4 rounded-xl border border-slate-100 grid grid-cols-1 md:grid-cols-2 gap-3"><Input label="Nombre Cliente" value={client.nombre} onChange={e=>setClient({...client, nombre:e.target.value})} /><Input label="Contacto" value={client.contacto} onChange={e=>setClient({...client, contacto:e.target.value})} /><Input label="Teléfono" value={client.telefono} onChange={e=>setClient({...client, telefono:e.target.value})} /><Input label="Ciudad Cliente" value={client.ciudad} onChange={e=>setClient({...client, ciudad:e.target.value})} /><Input label="Dirección" value={client.direccion} onChange={e=>setClient({...client, direccion:e.target.value})} /><div><Input label="Ciudad Entrega" list="cities-list" value={client.ciudad_entrega} onChange={e=>handleCityChange(e.target.value)} /><datalist id="cities-list">{shipping.map(s=><option key={s.id} value={s.ciudad}/>)}</datalist></div></div>{client.es_acopio && <div className="bg-indigo-50 p-3 rounded-lg border border-indigo-200 flex items-center justify-between"><div className="flex items-center gap-2 text-indigo-800 font-medium"><Icon name="Truck"/> <span>Ciudad con Acopio</span></div><select className="px-3 py-1 rounded border border-indigo-300 text-sm" value={client.estrategia} onChange={e=>setClient({...client, estrategia:e.target.value})}><option value="Acopio">Enviar a Acopio</option><option value="Directo">Envío Directo</option></select></div>}<div className="relative"><Input label="Agregar (SKU)" value={itemSearch} onChange={e=>setItemSearch(e.target.value)} placeholder="Buscar..." />{itemSearch && <div className="absolute top-full left-0 right-0 bg-white shadow-xl rounded-b-xl border z-10 max-h-48 overflow-auto">{products.filter(p=>p.sku.toLowerCase().includes(itemSearch.toLowerCase())||p.modelo.toLowerCase().includes(itemSearch.toLowerCase())).map(p=><div key={p.id} onClick={()=>addToCart(p)} className="p-3 hover:bg-indigo-50 cursor-pointer border-b flex justify-between"><span>{p.modelo} <span className="text-xs text-slate-400">({p.sku})</span></span><span className="font-bold text-indigo-600">{formatCurrency(p.precio)}</span></div>)}</div>}</div><div className="border rounded-xl overflow-hidden"><table className="w-full text-sm text-left"><thead className="bg-slate-100 text-xs font-bold text-slate-500"><tr><th className="p-3">Item</th><th className="p-3">Cant</th><th className="p-3 text-right">Total</th><th className="p-3"></th></tr></thead><tbody>{cart.map((it,i)=>(<tr key={i} className="border-t"><td className="p-3 flex gap-2 items-center"><img src={it.imagen} className="w-8 h-8 rounded bg-gray-100"/><div>{it.sku}<br/><span className="text-xs text-slate-400">{it.modelo}</span></div></td><td className="p-3">{it.cantidad}</td><td className="p-3 text-right">{formatCurrency(it.total)}</td><td className="p-3 text-right"><button onClick={()=>setCart(cart.filter((_,idx)=>idx!==i))} className="text-rose-500"><Icon name="X" size={14}/></button></td></tr>))}</tbody></table></div><div className="flex justify-end gap-3 pt-2"><Button variant="secondary" onClick={()=>{setModalOpen(false); setEditingId(null)}}>Cancelar</Button><Button onClick={submitOrder}>{editingId ? 'Actualizar' : 'Crear'}</Button></div></div></Modal>
+                  <Modal isOpen={guideModalOpen} onClose={()=>setGuideModalOpen(false)} title="Registrar Despacho"><div className="space-y-4"><div className="bg-slate-50 border border-slate-200 p-3 rounded text-sm text-slate-700">Se actualizarán <b>{guideForm.ordersToUpdate.length} pedidos</b> a estado <b>Enviado</b>.</div><Input type="date" label="Fecha de Envío" value={guideForm.date} onChange={e=>setGuideForm({...guideForm, date:e.target.value})} /><Input label="Número de Guía" value={guideForm.guide} onChange={e=>setGuideForm({...guideForm, guide:e.target.value})} placeholder="Ej: 999000123" /><div className="flex justify-end gap-2 pt-2"><Button variant="secondary" onClick={()=>setGuideModalOpen(false)}>Cancelar</Button><Button onClick={saveGuide}>Confirmar Envío</Button></div></div></Modal>
+                  <Modal isOpen={batchGuideModalOpen} onClose={()=>setBatchGuideModalOpen(false)} title="Despachar Lote"><div className="space-y-4"><div className="bg-indigo-50 border border-indigo-100 p-3 rounded text-sm text-indigo-800">Lote de <b>{batchGuideForm.ordersToUpdate.length} pedidos</b> a estado <b>Enviado</b>.</div><Input type="date" label="Fecha de Envío" value={batchGuideForm.date} onChange={e=>setBatchGuideForm({...batchGuideForm, date:e.target.value})} /><Input label="Número de Guía Maestra" value={batchGuideForm.guide} onChange={e=>setBatchGuideForm({...batchGuideForm, guide:e.target.value})} placeholder="Ej: TCC-LOTE-001" /><div className="flex justify-end gap-2 pt-2"><Button variant="secondary" onClick={()=>setBatchGuideModalOpen(false)}>Cancelar</Button><Button onClick={saveBatchGuide}>Confirmar</Button></div></div></Modal>
+              </div>
+          );
+      };
+
+      // 5. FINANZAS (SAFE SAVE)
+      const FinanzasView = () => {
+          const { data: orders } = useCollection('pedidos');
+          const { data: finanzas } = useCollection('finanzas');
+          const { data: config } = useCollection('config_finanzas');
+          const { data: generalConfig } = useCollection('config_general'); // Para folder de transacciones
+          const { notify } = useUI();
+          
+          const [modalOpen, setModalOpen] = useState(false);
+          const [uploading, setUploading] = useState(false);
+          
+          const [form, setForm] = useState({ 
+              tipo: 'Ingreso', // Ingreso, Gasto
+              categoria: '', 
+              metodo: '', 
+              monto: '', 
+              concepto: '',
+              transaction_id: '',
+              imagen: '' 
+          });
+
+          // Estado para Venta
+          const [searchOrder, setSearchOrder] = useState('');
+          const [selectedOrder, setSelectedOrder] = useState(null);
+          
+          const [finConfig, setFinConfig] = useState({ ingresos: [], gastos: [], methods: [] });
+          const [cloudConfig, setCloudConfig] = useState({});
+
+          useEffect(() => { if (config.length) setFinConfig(config[0]); }, [config]);
+          useEffect(() => { if (generalConfig.length) setCloudConfig(generalConfig[0]); }, [generalConfig]);
+
+          // Efecto para limpiar form al cambiar tipo
+          useEffect(() => { setForm(f => ({ ...f, categoria: '' })); }, [form.tipo]);
+
+          // Lógica Búsqueda Pedidos (Solo si categoría contiene "Venta" o es venta directa)
+          const filteredOrders = useMemo(() => {
+              if (!searchOrder || !orders.length) return [];
+              const lower = searchOrder.toLowerCase();
+              return orders.filter(o => 
+                  o.id_visual.includes(lower) || 
+                  o.cliente.nombre.toLowerCase().includes(lower) || 
+                  o.items.some(i => i.sku.toLowerCase().includes(lower))
+              );
+          }, [searchOrder, orders]);
+
+          const handleSelectOrder = (order) => {
+              setSelectedOrder(order);
+              setForm(f => ({ ...f, monto: order.total, concepto: `Cobro Pedido #${order.id_visual} - ${order.cliente.nombre}` }));
+              setSearchOrder('');
+          };
+
+          const handleFile = async (file) => {
+              if (!file || !cloudConfig.cloud_name) return notify("Falta config Cloudinary", "error");
+              setUploading(true);
+              try {
+                  const res = await uploadToCloudinary(
+                      file, 
+                      cloudConfig, 
+                      `TX-${Date.now()}`, 
+                      cloudConfig.cloudinary_transaction_folder || 'pagos'
+                  );
+                  setForm(prev => ({ ...prev, imagen: res.secure_url }));
+              } catch (e) { notify(e.message, "error"); }
+              setUploading(false);
+          };
+
+          const handleBulkImport = async (data) => {
+               const batch = window.fs.writeBatch(window.db);
+               data.forEach(item => {
+                  const docRef = window.fs.doc(window.fs.collection(window.db, 'finanzas'));
+                  // Sanitización básica para importación masiva
+                  batch.set(docRef, { 
+                      fecha: item.fecha ? new Date(item.fecha).toISOString() : new Date().toISOString(),
+                      tipo: item.tipo || 'Gasto',
+                      categoria: item.categoria || 'General',
+                      concepto: item.concepto || '',
+                      metodo: item.metodo || 'Efectivo',
+                      monto: Number(item.monto) || 0,
+                      transaction_id: item.transaction_id || '',
+                      pedido_id: item.pedido_id || null
+                  });
+              });
+              await batch.commit();
+              notify(`${data.length} registros importados`);
+          };
+
+          // --- SAFE SAVE TRANSACTION (BLINDADO) ---
+          const submitTransaction = async () => {
+              if (!form.monto || !form.categoria || !form.metodo) return notify("Faltan datos", "error");
+              
+              // Explicit mapping prevents data mix-up
+              const transaction = {
+                  tipo: form.tipo || 'Ingreso',
+                  categoria: form.categoria || '',
+                  metodo: form.metodo || '',
+                  concepto: form.concepto || '',
+                  transaction_id: form.transaction_id || '',
+                  imagen: form.imagen || '',
+                  monto: Number(form.monto) || 0,
+                  fecha: new Date().toISOString(),
+                  pedido_id: selectedOrder ? selectedOrder.id_visual : null
+              };
+
+              try {
+                  await window.fs.addDoc(window.fs.collection(window.db, 'finanzas'), transaction);
+                  
+                  if (selectedOrder) {
+                      await window.fs.updateDoc(window.fs.doc(window.db, 'pedidos', selectedOrder.id), { 
+                          pago_estado: 'Pagado' // Simplificación
+                      });
+                  }
+                  
+                  notify("Transacción registrada");
+                  setModalOpen(false); setForm({ tipo: 'Ingreso', categoria: '', metodo: '', monto: '', concepto: '', transaction_id: '', imagen: '' }); setSelectedOrder(null);
+              } catch (e) { notify(e.message, "error"); }
+          };
+
+          // Determinar si el método seleccionado es bancario
+          const selectedMethodObj = finConfig.methods?.find(m => m.name === form.metodo);
+          const isBank = selectedMethodObj?.isBank;
+
+          return (
+              <div className="h-full flex flex-col fade-in pb-20 md:pb-0">
+                  <div className="flex justify-between items-center mb-6">
+                      <h2 className="text-2xl font-bold text-slate-800">Finanzas</h2>
+                      <div className="flex gap-2">
+                          <BulkActions type="Finanzas" data={finanzas} onImport={handleBulkImport} sampleData={[{fecha: '2023-01-01', tipo: 'Ingreso', categoria: 'Venta', monto: 50000, concepto: 'Ejemplo', metodo: 'Efectivo'}]} />
+                          <Button onClick={() => setModalOpen(true)} icon="Plus">Registrar Movimiento</Button>
+                      </div>
+                  </div>
+                  <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden"><div className="overflow-x-auto"><table className="w-full text-sm text-left"><thead className="bg-slate-50 font-bold text-slate-500"><tr><th className="p-4">Fecha</th><th className="p-4">Tipo</th><th className="p-4">Cat</th><th className="p-4">Concepto</th><th className="p-4">Método</th><th className="p-4 text-right">Monto</th></tr></thead><tbody className="divide-y">{finanzas.sort((a,b)=>new Date(b.fecha)-new Date(a.fecha)).map(f=>(<tr key={f.id}><td className="p-4">{new Date(f.fecha).toLocaleDateString()}</td><td className="p-4"><span className={`px-2 py-1 rounded text-xs font-bold ${f.tipo==='Ingreso'?'bg-emerald-100 text-emerald-800':'bg-rose-100 text-rose-800'}`}>{f.tipo}</span></td><td className="p-4">{f.categoria}</td><td className="p-4 flex flex-col"><span className="font-medium">{f.concepto}</span>{f.transaction_id && <span className="text-xs text-slate-400 font-mono">Tx: {f.transaction_id}</span>}</td><td className="p-4">{f.metodo}</td><td className={`p-4 text-right font-bold ${f.tipo==='Ingreso'?'text-emerald-600':'text-rose-600'}`}>{f.tipo==='Ingreso'?'+':'-'}{formatCurrency(f.monto)}</td></tr>))}</tbody></table></div></div>
+                  <Modal isOpen={modalOpen} onClose={() => setModalOpen(false)} title="Registrar Movimiento">
+                      <div className="space-y-4">
+                          <div className="flex gap-4 p-1 bg-slate-100 rounded-lg"><button onClick={()=>setForm({...form, tipo:'Ingreso'})} className={`flex-1 py-2 rounded-md text-sm font-bold transition-all ${form.tipo==='Ingreso'?'bg-white shadow text-emerald-600':'text-slate-500'}`}>Ingreso</button><button onClick={()=>setForm({...form, tipo:'Gasto'})} className={`flex-1 py-2 rounded-md text-sm font-bold transition-all ${form.tipo==='Gasto'?'bg-white shadow text-rose-600':'text-slate-500'}`}>Gasto</button></div>
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4"><div><label className="text-xs font-bold text-slate-500 uppercase block mb-1">Categoría</label><select className="w-full px-3 py-2.5 bg-white border border-slate-200 rounded-lg text-sm outline-none" value={form.categoria} onChange={e=>setForm({...form, categoria:e.target.value})}><option value="">Selecciona...</option>{(form.tipo==='Ingreso' ? finConfig.ingresos : finConfig.gastos)?.map(c=><option key={c} value={c}>{c}</option>)}</select></div><NumberInput label="Monto" value={form.monto} onChange={e=>setForm({...form, monto:e.target.value})} /></div>
+                          {form.tipo === 'Ingreso' && form.categoria.toLowerCase().includes('venta') && (<div className="bg-indigo-50 p-3 rounded-lg border border-indigo-100 relative"><label className="text-xs font-bold text-indigo-800 uppercase block mb-1">Vincular Pedido</label>{selectedOrder ? (<div className="flex justify-between items-center bg-white p-2 rounded border border-indigo-200"><span className="text-sm font-bold text-indigo-900">#{selectedOrder.id_visual} - {selectedOrder.cliente.nombre}</span><button onClick={()=>setSelectedOrder(null)} className="text-rose-500"><Icon name="X" size={16}/></button></div>) : (<><Input placeholder="Buscar por Cliente, ID, SKU..." value={searchOrder} onChange={e=>setSearchOrder(e.target.value)} />{searchOrder && filteredOrders.length > 0 && (<div className="absolute top-full left-0 right-0 bg-white shadow-xl rounded-b-xl border z-10 max-h-40 overflow-auto">{filteredOrders.map(o => (<div key={o.id} onClick={()=>handleSelectOrder(o)} className="p-2 hover:bg-indigo-50 cursor-pointer border-b text-sm flex justify-between"><span>#{o.id_visual} {o.cliente.nombre}</span><span className="font-bold">{formatCurrency(o.total)}</span></div>))}</div>)}</>)}</div>)}
+                          <Input label="Concepto / Detalle" value={form.concepto} onChange={e=>setForm({...form, concepto:e.target.value})} />
+                          <div><label className="text-xs font-bold text-slate-500 uppercase block mb-1">Método de Pago</label><select className="w-full px-3 py-2.5 bg-white border border-slate-200 rounded-lg text-sm outline-none" value={form.metodo} onChange={e=>setForm({...form, metodo:e.target.value})}><option value="">Selecciona...</option>{finConfig.methods?.map(m=><option key={m.name} value={m.name}>{m.name}</option>)}</select></div>
+                          {isBank && (<div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-3"><Input label="Número de Transacción" value={form.transaction_id} onChange={e=>setForm({...form, transaction_id:e.target.value})} placeholder="Ej: 098213" /><ImageUploader image={form.imagen} onFileSelect={handleFile} loading={uploading} onClear={() => setForm({...form, imagen: ''})} /></div>)}
+                          <div className="pt-2 flex justify-end gap-3"><Button variant="secondary" onClick={() => setModalOpen(false)}>Cancelar</Button><Button onClick={submitTransaction} disabled={uploading}>Registrar</Button></div>
+                      </div>
+                  </Modal>
+              </div>
+          );
+      };
+
+      // 6. COMPARTIR (Fixed)
+      const ShareView = () => {
+          const { data: products } = useCollection('productos');
+          const [index, setIndex] = useState(0);
+          const pending = products.filter(p => !p.compartido);
+          const current = pending[index];
+          const { notify } = useUI();
+
+          const markAsShared = async () => { if(current) { await window.fs.updateDoc(window.fs.doc(window.db, 'productos', current.id), { compartido: true }); if(index>=pending.length-1) setIndex(0); }};
+          const copyImage = () => {
+              if(!current.imagen) return notify("No hay imagen", "error");
+              try {
+                  const imgPromise = new Promise(async (resolve, reject) => {
+                      try {
+                          const img = new Image(); img.crossOrigin = "anonymous"; img.src = current.imagen + '?t=' + new Date().getTime();
+                          await new Promise((r, j) => { img.onload = r; img.onerror = j; });
+                          const canvas = document.createElement('canvas'); canvas.width = img.naturalWidth; canvas.height = img.naturalHeight;
+                          const ctx = canvas.getContext('2d'); ctx.drawImage(img, 0, 0);
+                          canvas.toBlob(blob => { if (blob) resolve(blob); else reject(new Error("Error al procesar imagen")); }, 'image/png');
+                      } catch (err) { reject(err); }
+                  });
+                  navigator.clipboard.write([new ClipboardItem({ 'image/png': imgPromise })]).then(() => notify("Imagen copiada!")).catch(e => { 
+                      console.error(e); 
+                      // FALLBACK: Si falla la escritura programática (Safari/Iframe), abrir la imagen para copiar manual.
+                      notify("Abre la imagen y cópiala manual", "info"); 
+                      window.open(current.imagen, '_blank'); 
+                  });
+              } catch (e) { notify("Navegador no compatible", "error"); }
+          };
+          const copyInfo = async () => { 
+            const text = `SKU: ${current.sku}\nMarca: ${current.marca}\nModelo: ${current.modelo}\nGénero: ${current.genero}\nPrecio: ${formatCurrency(current.precio)}`;
+            await copyToClipboard(text); 
+            notify("Info copiada!"); 
+          };
+
+          if (!current) return <div className="h-full flex flex-col items-center justify-center text-slate-400"><Icon name="CheckCircle" size={64} className="mb-4 text-emerald-500"/><h2 className="text-xl font-bold text-slate-700">¡Todo compartido!</h2></div>;
+
+          return (
+              <div className="h-full flex flex-col items-center justify-center fade-in p-4 pb-20 md:pb-0">
+                  <div className="bg-white rounded-2xl shadow-xl overflow-hidden max-w-sm w-full border border-slate-200">
+                      <div className="relative h-64 bg-slate-100 flex items-center justify-center">{current.imagen ? <img src={current.imagen} className="w-full h-full object-contain"/> : <Icon name="Image" size={48} className="text-slate-300"/>}</div>
+                      <div className="p-6"><h2 className="text-2xl font-bold text-slate-800 mb-1">{current.modelo}</h2><p className="text-sm text-slate-500 mb-4">{current.marca} • {current.genero}</p><div className="flex justify-between items-center mb-6 bg-slate-50 p-3 rounded-lg"><span className="font-mono font-bold text-indigo-600">{current.sku}</span><span className="font-bold text-xl text-emerald-600">{formatCurrency(current.precio)}</span></div><div className="grid grid-cols-2 gap-3 mb-4"><Button variant="secondary" onClick={copyImage} icon="Image">Copiar IMG</Button><Button variant="secondary" onClick={copyInfo} icon="Copy">Copiar TXT</Button></div><Button onClick={markAsShared} className="w-full h-12 text-lg bg-indigo-600 hover:bg-indigo-700">Marcar Compartido</Button></div>
+                  </div>
+              </div>
+          );
+      };
+
+      // --- APP SHELL ---
+      const App = () => {
+          const [ready, setReady] = useState(false);
+          const [view, setView] = useState('orders'); // Default to inventory to test
+          useEffect(() => { if (window.db) setReady(true); }, []);
+          if (!ready) return <UIProvider><SetupScreen onReady={() => setReady(true)} /></UIProvider>;
+          return (
+              <UIProvider>
+                  <div className="flex h-screen bg-slate-100 font-sans text-slate-900 flex-col md:flex-row">
+                      <aside className="hidden md:flex w-64 bg-slate-900 text-slate-300 flex-col shadow-2xl z-20">
+                          <div className="h-16 flex items-center px-6 font-bold text-white text-xl border-b border-slate-800 tracking-tight">ERP <span className="text-indigo-500 ml-1">v3</span></div>
+                          <nav className="flex-1 py-6 space-y-1 px-3">
+                              <button onClick={() => setView('orders')} className={`w-full flex items-center gap-3 px-3 py-3 rounded-lg transition-all ${view==='orders'?'bg-indigo-600 text-white shadow-lg shadow-indigo-900/50':'hover:bg-slate-800 hover:text-white'}`}><Icon name="ShoppingCart" /> <span>Pedidos</span></button>
+                              <button onClick={() => setView('inventory')} className={`w-full flex items-center gap-3 px-3 py-3 rounded-lg transition-all ${view==='inventory'?'bg-indigo-600 text-white shadow-lg shadow-indigo-900/50':'hover:bg-slate-800 hover:text-white'}`}><Icon name="Package" /> <span>Inventario</span></button>
+                              <button onClick={() => setView('finanzas')} className={`w-full flex items-center gap-3 px-3 py-3 rounded-lg transition-all ${view==='finanzas'?'bg-indigo-600 text-white shadow-lg shadow-indigo-900/50':'hover:bg-slate-800 hover:text-white'}`}><Icon name="Banknote" /> <span>Finanzas</span></button>
+                              <button onClick={() => setView('share')} className={`w-full flex items-center gap-3 px-3 py-3 rounded-lg transition-all ${view==='share'?'bg-indigo-600 text-white shadow-lg shadow-indigo-900/50':'hover:bg-slate-800 hover:text-white'}`}><Icon name="Share2" /> <span>Compartir</span></button>
+                              <button onClick={() => setView('config')} className={`w-full flex items-center gap-3 px-3 py-3 rounded-lg transition-all ${view==='config'?'bg-indigo-600 text-white shadow-lg shadow-indigo-900/50':'hover:bg-slate-800 hover:text-white'}`}><Icon name="Settings" /> <span>Configuración</span></button>
+                          </nav>
+                      </aside>
+                      <main className="flex-1 overflow-hidden flex flex-col relative pb-16 md:pb-0">
+                          <header className="h-16 bg-white shadow-sm border-b border-slate-200 flex items-center justify-between px-4 md:px-8 z-10"><h1 className="font-bold text-slate-700 capitalize">{view==='orders'?'Gestión de Pedidos':view==='inventory'?'Inventario General':view==='config'?'Configuración':view}</h1></header>
+                          <div className="flex-1 overflow-auto p-4 md:p-8">
+                              {view === 'inventory' && <InventoryView />}
+                              {view === 'config' && <ConfigView />}
+                              {view === 'share' && <ShareView />}
+                              {view === 'orders' && <OrdersView />}
+                              {view === 'finanzas' && <FinanzasView />}
+                          </div>
+                      </main>
+                      {/* Mobile Bottom Nav */}
+                      <div className="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 flex justify-around items-center h-16 z-50 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)]">
+                          <button onClick={() => setView('orders')} className={`flex flex-col items-center justify-center w-full h-full ${view==='orders'?'text-indigo-600':'text-slate-400'}`}><Icon name="ShoppingCart" size={20} /><span className="text-[10px] mt-1 font-medium">Pedidos</span></button>
+                          <button onClick={() => setView('inventory')} className={`flex flex-col items-center justify-center w-full h-full ${view==='inventory'?'text-indigo-600':'text-slate-400'}`}><Icon name="Package" size={20} /><span className="text-[10px] mt-1 font-medium">Inv.</span></button>
+                          <button onClick={() => setView('finanzas')} className={`flex flex-col items-center justify-center w-full h-full ${view==='finanzas'?'text-indigo-600':'text-slate-400'}`}><Icon name="Banknote" size={20} /><span className="text-[10px] mt-1 font-medium">Finanzas</span></button>
+                          <button onClick={() => setView('share')} className={`flex flex-col items-center justify-center w-full h-full ${view==='share'?'text-indigo-600':'text-slate-400'}`}><Icon name="Share2" size={20} /><span className="text-[10px] mt-1 font-medium">Social</span></button>
+                          <button onClick={() => setView('config')} className={`flex flex-col items-center justify-center w-full h-full ${view==='config'?'text-indigo-600':'text-slate-400'}`}><Icon name="Settings" size={20} /><span className="text-[10px] mt-1 font-medium">Config</span></button>
+                      </div>
+                  </div>
+              </UIProvider>
+          );
+      };
+
+      const root = ReactDOM.createRoot(document.getElementById('root'));
+      root.render(<App />);
+    </script>
+  </body>
+</html>
